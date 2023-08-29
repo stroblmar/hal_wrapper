@@ -26,7 +26,6 @@ class OnLatticeModel():
                                "rFrac": 0.05, # Initial resistance fraction in [0,1]
                                "tEnd": 5, # End time in days
                                "dt": 1, # Time step in days
-                               # TODO: Test whether the schedule gets passed correctly
                                "treatmentScheduleList": None, # Treatment schedule in format [[tStart, tEnd, drugConcentration]]
                                # -------------------- Cell Properties --------------------
                                "divisionRate_S": 0.027, "divisionRate_R": 0.027, # Proliferation rate of cells in d^-1.
@@ -46,6 +45,7 @@ class OnLatticeModel():
                                "imageOutDir": "./tmp/", "imageFrequency": -1, # Saving of simulation images. Negative freq turns it off.") 
                                # -------------------- Output - Model File --------------------
                                # TODO: Get this implemented
+                               "loadModel": False, # Whether or not to run simulation using a previously saved model object.
                                "saveModelState": False, # Whether or not to save the model object at the end of the simulation.
                                "savedModelFileName": None # Name of model file to load when continuing a previous run.
                                }
@@ -98,7 +98,7 @@ class OnLatticeModel():
         if printCommand: print("java -jar %s" % self.jarFileName + argStr)
         os.system("java -jar %s" % self.jarFileName + argStr)
 
-    def LoadSimulations(self, normalise=True):
+    def LoadSimulations(self, normalise=False):
         tmpList = []
         replicateIdList = range(self.modelConfigDic['nReplicates']) if self.modelConfigDic['nReplicates']>1 else [self.modelConfigDic['seed']]
         for replicateId in replicateIdList:
@@ -108,6 +108,7 @@ class OnLatticeModel():
             tmpDf['ReplicateId'] = replicateId
             tmpList.append(tmpDf)
         resultsDf = pd.concat(tmpList)
+        resultsDf = resultsDf.sort_values(by="Time")
         resultsDf.rename(columns={"NCells": "TumourSize",
                                   "NCells_S": "S",
                                   "NCells_R": "R"}, inplace=True)
@@ -137,9 +138,9 @@ class OnLatticeModel():
 
         # Load data
         self.resultsDf = self.LoadSimulations()
-        self.resultsDf = self.resultsDf.groupby(by="Time").mean()
-        self.resultsDf.reset_index(inplace=True)
-        self.resultsDf.drop(columns="ReplicateId", inplace=True)
+        # self.resultsDf = self.resultsDf.groupby(by="Time").mean()
+        # self.resultsDf.reset_index(inplace=True)
+        # self.resultsDf.drop(columns="ReplicateId", inplace=True)
         if scaleTumourVolume: self.NormaliseToInitialSize(self.resultsDf)
 
     # =========================================================================================

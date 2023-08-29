@@ -24,6 +24,7 @@ public class OnLatticeGrid extends AgentGrid2D<Cell> implements SerializableMode
     double initialSize = 1000; // Total initial cell number (absolute)
     double initialSizeProp; // Initial cell density relative to (physical) carrying capacity
     double rFrac = 0.05; // Initial resistance fraction in [0,1]
+    String initialConditionType = "random"; // Seeding architecture ("random" or "circle")
     double divisionRate_S = 0.027; // Proliferation rate of sensitive cells in d^-1. Proliferation will be attempted at this rate.
     double divisionRate_R = 0.027; // Proliferation rate of resistant cells in d^-1
     double movementRate_S = 0; // Movement rate of sensitive cells in d^-1. Movement will be attempted at this rate.
@@ -79,11 +80,11 @@ public class OnLatticeGrid extends AgentGrid2D<Cell> implements SerializableMode
         int[] replicateIdList = new int[] {myModel.seed};
         int replicateId;
         int[] initPopSizeArr = {0, 0};
-        double[][] treatmentScheduleList = {{0, 50, 0}}; // Treatment schedule in format {{tStart, tEnd, drugConcentration}}
+        double[][] treatmentScheduleList = {{0, 25, 0}, {25, 100, 1}}; // Treatment schedule in format {{tStart, tEnd, drugConcentration}}
         String outDir = "./tmp/";
         Boolean fromScratch = true; 
         Boolean visualiseB = true;
-        int pause = 250;
+        int pause = 100;
         String savedModelFileName = null; // Name of model file to load when continuing a previous run
         String currSavedModelFileName;
 
@@ -195,6 +196,11 @@ public class OnLatticeGrid extends AgentGrid2D<Cell> implements SerializableMode
 
     public void SetInitialState(int[] initialStateArr) {this.initPopSizeArr = initialStateArr;}
 
+    public void SetInitialState(int[] initialStateArr, String initialConditionType) {
+        this.initPopSizeArr = initialStateArr;
+        this.initialConditionType = initialConditionType;
+    }
+
     public void SetDrugConcentration(double drugConcentration) {
         this.currDrugConcentration = drugConcentration;
     }
@@ -283,6 +289,49 @@ public class OnLatticeGrid extends AgentGrid2D<Cell> implements SerializableMode
         }
     }
 
+    public void InitSimulation_Circle(int s0, int r0) {
+        // Places tumor cells in a circle
+        int nCells = s0 + r0;
+        int[] distributionOfResistanceArr = new int[nCells];
+        Arrays.fill(cellCountsArr, 0); // clear the cell counter
+        
+        // Find the radius of a circle which would fit all the cells
+        double radius = 1;
+        int[] circleHood = Util.CircleHood(true, radius); //generate circle neighborhood [x1,y1,x2,y2,...]
+        int nPositions = MapHood(circleHood, xDim / 2, yDim / 2);
+        while(nPositions < nCells) {
+            radius++;
+            circleHood = Util.CircleHood(true, radius);
+            nPositions = MapHood(circleHood, xDim / 2, yDim / 2);
+            // System.out.println(Util.ArrToString(new int[] {(int) radius, nPositions},","));
+        }
+
+        // Generate a list of random assignment to sensitive or resistance
+        for (int i = 0; i < s0; i++) {
+            distributionOfResistanceArr[i] = 0;
+        }
+        for (int i = s0; i < s0 + r0; i++) {
+            distributionOfResistanceArr[i] = 1;
+        }
+        rn_ICs.Shuffle(distributionOfResistanceArr);
+
+        // Place cells
+        for (int i = 0; i < nCells; i++) {
+            Cell c = NewAgentSQ(circleHood[i]);
+            c.resistance = distributionOfResistanceArr[i];
+            if (c.resistance == 0) {
+                c.divisionRate = this.divisionRate_S;
+                c.movementRate = this.movementRate_S;
+                c.deathRate = this.deathRate_S;
+            } else {
+                c.divisionRate = this.divisionRate_R;
+                c.movementRate = this.movementRate_R;
+                c.deathRate = this.deathRate_R;
+            }
+            c.Draw();
+            cellCountsArr[c.resistance] += 1; // Update population counter
+        }
+    }
     // ------------------------------------------------------------------------------------------------------------
     public void StepCells() {
         Arrays.fill(cellCountsArr, 0);//clear the cell counts
@@ -337,18 +386,20 @@ public class OnLatticeGrid extends AgentGrid2D<Cell> implements SerializableMode
     // ------------------------------------------------------------------------------------------------------------
     public void Run() {
         // Initialise visualisation window
-        // UIGrid currVis = new UIGrid(xDim, yDim, scaleFactor, visualiseB);
-        // this.vis = currVis;
-        // GridWindow vis=new GridWindow(xDim,yDim,scaleFactor);//used for visualization
-        // vis.AddAlphaGrid(currVis);
-        UIGrid currVis = new UIGrid(xDim, yDim, scaleFactor, visualiseB);
+        UIGrid currVis = new UIGrid(xDim, yDim, scaleFactor, visualiseB); // For head-less run
         this.vis = currVis;
+        // Comment out next line if want to run with viz on in vscode xxx
+        GridWindow vis=new GridWindow(xDim,yDim,scaleFactor); vis.AddAlphaGrid(currVis);
         Boolean completedSimulationB = false;
         Boolean logged = false;
         currDrugConcentration = treatmentScheduleList[0][2];
         // Set up the grid and initialise log if this is the beginning of the simulation
         if (tIdx==0) {
+            if (initialConditionType.equalsIgnoreCase("random")) {
             InitSimulation_Random(initPopSizeArr[0], initPopSizeArr[1]);
+            } else if (initialConditionType.equalsIgnoreCase("circle")) {
+                InitSimulation_Circle(initPopSizeArr[0], initPopSizeArr[1]);
+            }            
             PrintStatus(0);
             if (cellCountLogFile==null && cellCountLogFileName!=null) {InitialiseCellLog(this.cellCountLogFileName);}
             SaveCurrentCellCount(0);
@@ -366,9 +417,8 @@ public class OnLatticeGrid extends AgentGrid2D<Cell> implements SerializableMode
 
         // Run the simulation
         double currIntervalEnd;
-        int initialCellNumber = Util.ArraySum(cellCountsArr);
         if (treatmentScheduleList==null) treatmentScheduleList = new double[][]{{0,tEnd,currDrugConcentration}};
-        for (int intervalIdx=0; intervalIdx<treatmentScheduleList.length;intervalIdx++) {
+        for (int intervalIdx=0; intervalIdx<treatmentScheduleList.length; intervalIdx++) {
             currIntervalEnd = treatmentScheduleList[intervalIdx][1];
             nTSteps = (int) Math.ceil(currIntervalEnd/dt);
             currDrugConcentration = treatmentScheduleList[intervalIdx][2];
